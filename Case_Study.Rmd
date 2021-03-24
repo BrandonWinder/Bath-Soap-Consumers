@@ -1,0 +1,601 @@
+---
+title: "Segmenting Consumers of Bath Soap"
+author: "Brandon Winder"
+date: "12/15/2020"
+output: word_document
+indent: true
+---
+
+```{r include=FALSE}
+# Call all necessary libraries.
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(factoextra)
+library(reshape2)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(knitr)
+library(randomForest)
+```
+
+## Introduction 
+
+This problem focused on creating good market segmentations that would allow IMRB to design more cost-effective promotions for bath soaps. This allows for multiple different promotions to be offered throughout the year targeting different clientele. The data set provided contains 600 households with 46 different variables from the Asian market research agency, CRISA. CRISA usually clusters markets based on purchasers demographics but would now like to use variables more directly related to the purchasing process. These key variables are purchase behavior and basis of a purchase. All of the variables of interest are broken up into categorical or quantitative below:
+
+
+__Categorical:__
+
+_SEC_: Socioeconomic class (1 = high, 4 = low)          
+
+_FEH_: Eating habits (0 = Not Specified, 1 = Vegetarian, 2 = Vegetarian but eats eggs, 3 = non-vegetarian)
+
+_SEX_: Gender (0 = Not Specified, 1 = Male, 2 = Female)
+
+_AGE_: Age of homemaker (1 = $\leq$ 24, 2 = 25-34, 3 = 35-44, 4 = 45+)
+
+_EDU_: Education of homemaker (0 = Not specified, 1 = Illiterate, 2 = Literate, but no formal schooling, 3 = Up to 4 years of school, 4 = 5-9 years of school, 5 = 10-12 years of school, 6 = Some college, 7 = College graduate, 8 = Some graduate school, 9 = Graduate or professional school degree)
+                   
+_CHILD_: Presence of children in household (1 = Children up to age 6 present (only), 2 = Children 7-14 present (only), 3 = Both, 4 = None, 5 = Not specified)
+
+_CS_: Television availability (0 = Not Specified, 1 = Cable/Broadcast TV, 2 = Unavailable)
+
+__Quantitative:__
+
+_No. of Brands_: Number of brands purchased
+
+_Brand Runs_: Number of times consecutive purchase of a brand
+
+_Total Volume_: Sum of volume
+
+_No. of  Trans_: Number of transactions
+
+_Value_: Sum of value
+
+_Avg. Price_: Average price of purchase
+
+_Pur Vol No Promo - %_: Percent of volume purchased without promotion
+
+_Pur Vol Promo 6 %_: Percent of volume purchased with banded offer promotion
+
+_Pur Vol Other Promo %_: Percent of volume purchased with other promotion
+
+_Br. Cd. 57, 144_: Percent of volume purchased for brand Lux Beauty and Lux International White
+
+_Br. Cd. 55_: Percent of volume purchased for brand Lifebouy
+
+_Br. Cd. 272_: Percent of volume purchased for brand Cinthol Lime Fresh
+
+_Br. Cd. 286_: Percent of volume purchased for brand Pond's Mois.& Cleansing
+
+_Br. Cd. 24_: Percent of volume purchased for brand Pears
+
+_Br. Cd. 481_: Percent of volume purchased for brand Godrej Fair Glow
+
+_Br. Cd. 352_: Percent of volume purchased for brand Hamam Herbal
+
+_Br. Cd. 5_: Percent of volume purchased for brand Dettol
+
+_Others 999_: Percent of volume purchased for other 999 brands
+
+_Max Brand Loyalty_: Maximum percentage from the variables Br. Cd. 55, 272, 286, 24, 481, 352, 5.
+
+_Pr Cat 1_: Percent of volume purchased for Premium Soaps
+
+_Pr Cat 2_: Percent of volume purchased for Popular Soaps
+
+_Pr Cat 3_: Percent of volume purchased for Economy/Carbolic
+
+_Pr Cat 4_: Percent of volume purchased for Sub-Popular
+
+_PropCat 5_: Percent of volume purchased for Beauty
+
+_PropCat 6_: Percent of volume purchased for Health
+
+_PropCat 7_: Percent of volume purchased for Herbal
+
+_PropCat 8_: Percent of volume purchased for Freshness
+
+_PropCat 9_: Percent of volume purchased for Hair
+
+_PropCat 10_: Percent of volume purchased for Skin Care
+
+_PropCat 11_: Percent of volume purchased for Fairness
+
+_PropCat 12_: Percent of volume purchased for Baby
+
+_PropCat 13_: Percent of volume purchased for Glycerine
+
+_PropCat 14_: Percent of volume purchased for Carbolic
+
+_PropCat 15_: Percent of volume purchased for Others
+
+
+```{r include=FALSE}
+# Read in the data file.
+bath <- read.csv("BathSoap.csv")
+
+# Change the column names. 
+colnames(bath) <- bath[2, ]
+
+# Remove extra rows and columns.
+bath <- bath[-c(1:2, 603:4888), -c(47:67)]
+
+# Remove the % sign in the last 26 variables.
+for(i in 20:46){
+  bath[, i] <- str_remove(bath[, i], "\\%")
+}
+
+# Change all variables to be numeric.
+for(i in 1:46){
+  bath[, i] <- as.numeric(bath[, i])
+}
+
+# Assign names to values for categorical variables.
+bath <- bath %>% mutate(
+  FEH = case_when(FEH == 1 ~ "Pure Vegetarian",
+                  FEH == 2 ~ "Vegetarian but Eats Eggs",
+                  FEH == 3 ~ "Non-Vegetarian",
+                  TRUE ~ "Not Specified"),
+  SEX = case_when(SEX == 1 ~ "Male",
+                  SEX == 2 ~ "Female",
+                  TRUE ~ "Not Specified"),
+  CHILD = case_when(CHILD == 1 ~ "Only Up to Age 6 Present",
+                    CHILD == 2 ~ "7-14 Present only",
+                    CHILD == 3 ~ "Both",
+                    CHILD == 4 ~ "None",
+                    TRUE ~ "Not Specified"),
+  CS = case_when(CS == 1 ~ "Cable/Boradcast TV Available",
+                 CS == 2 ~ "Unavailable",
+                 TRUE ~ "Not Specified"),
+  AGE = case_when(AGE == 1 ~ "Up to 25",
+                  AGE == 2 ~ "25-34",
+                  AGE == 3 ~ "35-44",
+                  TRUE ~ "45+"),
+  SEC = case_when(SEC == 1 ~ "High",
+                  SEC == 2 ~ "Medium High",
+                  SEC == 3 ~ "Medium Low",
+                  TRUE ~ "Low"),
+  EDU = case_when(EDU == 1 ~ "Illiterate",
+                  EDU == 2 ~ "Literate, but not formal schooling",
+                  EDU == 3 ~ "Up to 4 years of school",
+                  EDU == 4 ~ "5-9 years of school",
+                  EDU == 5 ~ "10-12 years of school",
+                  EDU == 6 ~ "Some college",
+                  EDU == 7 ~ "College graduate",
+                  EDU == 8 ~ "Some graduate school",
+                  EDU == 9 ~ "Graduate or professional school degree", 
+                  TRUE ~ "Not Specified"))
+
+# Change categorical variables to be factors.
+bath$FEH <- factor(bath$FEH, levels = c("Not Specified", "Pure Vegetarian", "Vegetarian but Eats Eggs", "Non-Vegetarian"))
+bath$MT <- as.factor(bath$MT)
+bath$SEX <- factor(bath$SEX, levels = c("Not Specified", "Male", "Female"))
+bath$CHILD <- factor(bath$CHILD, levels = c("Only Up to Age 6 Present", "7-14 Present only", "Both", "None", "Not Specified"))
+bath$CS <- factor(bath$CS, levels = c("Not Specified", "Cable/Boradcast TV Available", "Unavailable"))
+bath$AGE <- factor(bath$AGE, levels = c("Up to 25", "25-34", "35-44", "45+"))
+bath$EDU <- factor(bath$EDU, levels = c("Not Specified", "Illiterate", "Literate, but not formal schooling", "Up to 4 years of school", "5-9 years of school", "10-12 years of school", "Some college", "College graduate",  "Some graduate school", "Graduate or professional school degree"))
+bath$SEC <- factor(bath$SEC, levels = c("High", "Medium High", "Medium Low", "Low"))
+
+# Create the variable Max Brand Loyalty
+bath$'Max Brand Loyalty' <- rep(0, length(rownames(bath)))
+for(i in 1:length(rownames(bath))){
+  bath[i, 47] <- max(bath[i, 23:30])
+}
+```
+
+## Identify Cluster of Households
+
+### For Purchase Behavior
+
+The variables that describe purchase behavior (including brand loyalty) are: _Pur Vol No Promo - %_, _Pur Vol Promo 6%_, _Pur Vol Other Promo %_, _Brand Runs_, _No. of Trans_, _No. of Brands_, _Total Volume_,  _Value_, _Others 999_, and _Max Brand Loyalty_. The variable _Max Brand Loyalty_ was created to determine if a household was loyal to any specific brand or if they shopped for soaps sold by any brand. This variable was created from the eight brandwise purchase variables (Br. Cd. variables listed above) by selecting the maximum percent from each household. If this percent is greater than the percent for the variable _Others 999_, the household is loyal to one of the eight specific brand. 
+
+After selecting the variables of interest and normalizing them, the optimal number of clusters plot has been created using the silhouette method. This plot is shown in Figure 1.
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create new data frame with only variables of interest.
+bath_purch <- bath %>% select(20:22, `Brand Runs`, `No. of  Trans`, `No. of Brands`, `Total Volume`, Value, `Others 999`, `Max Brand Loyalty`)
+
+# Normalize the data.
+bath_purch_norm <- scale(bath_purch)
+rownames(bath_purch_norm) <- bath$`Member id`
+
+# Find the optimal number of clusters.
+fviz_nbclust(bath_purch_norm, kmeans, k.max = 5, method = "silhouette") + labs(subtitle = "Silhouette method", caption = "Figure 1. Optimal Number of clusters for purchase behavior.")
+```
+
+Then the *k*-means clustering method using the optimal number of clusters was run. Figure 2 shows the cluster centroids plot with normalized data and Table 1 shows the centroid values with un-normalized data.
+
+```{r echo=FALSE}
+# Run the K-means with optimal number of clusters.
+set.seed(111)
+bath_purch_km <- kmeans(bath_purch_norm, 5)
+
+# Display the size of the clusters.
+paste("The size of cluster 1 is: ", bath_purch_km$size[1])
+paste("The size of cluster 2 is: ", bath_purch_km$size[2])
+paste("The size of cluster 3 is: ", bath_purch_km$size[3])
+paste("The size of cluster 4 is: ", bath_purch_km$size[4])
+paste("The size of cluster 5 is: ", bath_purch_km$size[5])
+
+# Create cluster data frame.
+cluster_purch <- rownames(bath_purch_km$centers)
+centers_purch <- data.frame(cluster_purch, bath_purch_km$centers)
+
+# Reshape.
+centers_purch.plot <- melt(centers_purch, id.vars = "cluster_purch", measure.vars = names(centers_purch[,-1]))
+
+# Make cluster names a factor variable
+centers_purch.plot$cluster <- factor(centers_purch.plot$cluster)
+
+# Create the plot.
+ggplot(centers_purch.plot, aes(x = variable, y = value, color = cluster, group = cluster)) + 
+  geom_line() + 
+  geom_point() +
+  labs(caption = "Figure 2. Centroid plot for purchase behavior") +
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, size = 6), axis.title.x = element_blank())
+
+# Display the un-normalized means for each variable by cluster.
+bath_purch_tab <- t(round(aggregate(bath_purch, by = list(bath_purch_km$cluster), FUN = mean), 2))
+colnames(bath_purch_tab) <- c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5")
+bath_purch_tab <- bath_purch_tab[-1, ]
+kable(bath_purch_tab, caption = "Table 1. Purchase Behavior Centroids")
+```
+
+The size of the clusters is not very evenly spread out, Cluster 2 & 4 have a lower number of households while Clusters 1, 3 & 5 have a higher number of households in them. Using the results from Figure 2 and Table 1 the following key variables can be seen:
+
+Cluster 1 (Loyal Cluster): This is the most loyal clusters because it has the lowest percent volume purchased from the _Others 999_ and the highest _Max Brand Loyalty_. It also has the lowest _Pur Vol Promo 6%_ and _Brand Runs_. Additionally it has the highest _Pur Vol No Promo - %_.
+
+Cluster 2 (High Volume Cluster): This has the highest value for _No. of Trans_, _Total Volume_ and _Value_. It also does not have great brand loyalty because its _Max Brand Loyalty_ is lower than the _Others 999_ value.
+
+Cluster 3 (Un-loyal Cluster): This is the least loyal cluster as it has the highest percent volume purchased in _Others 999_ and the lowest _Max Brand Loyalty_. It also has the lowest _No. of Trans_, _No. of Brands_, _Total Volume_ and _Value_.
+
+Cluster 4 (Promotions Cluster): This cluster has a very low _Pur Vol No Promo - %_ and a very high _Pur Vol Promo 6%_ and _Pur Vol Other Promo %_. Additionally it does not have good brand loyalty.
+
+Cluster 5 (Many Brands Cluster): This cluster does not have great brand loyalty and has the highest value for _No. of Brands_.
+
+
+### For Basis of Purchase 
+
+The variables that describe the basis of purchase are: _Avg. Price_, each price category (Pr Cat 1-4), and each selling propositionwise purchase (PropCat 5-15). 
+
+Selecting these variables and normalizing them was the first step taken. Then the optimal number of clusters plot was created to find the number of clusters to use for the *k*-means clustering. This plot is shown in Figure 3.
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Select the variables of interest.
+bath_basis <- bath %>% select(`Avg. Price `, 32:46)
+
+# Normalize the data.
+bath_basis_norm <- scale(bath_basis)
+rownames(bath_basis_norm) <- bath$`Member id`
+
+# Find the optimal number of clusters.
+fviz_nbclust(bath_basis_norm, kmeans, k.max = 5, method = "silhouette") + labs(subtitle = "Silhouette method", caption = "Figure 3. Optimal Number of clusters for casis of purchase.")
+```
+
+Then the optimal number of clusters from Figure 3 was used to run the *k*-means clustering. The cluster centroid plot with normalized data is shown in Figure 4 and Table 2 displays the centroid values with un-normalized data. 
+
+```{r echo=FALSE}
+# Run the K-means with optimal number of clusters.
+set.seed(111)
+bath_basis_km <- kmeans(bath_basis_norm, 3)
+
+# Display the size of the clusters.
+paste("The size of cluster 1 is: ", bath_basis_km$size[1])
+paste("The size of cluster 2 is: ", bath_basis_km$size[2])
+paste("The size of cluster 3 is: ", bath_basis_km$size[3])
+
+# Create cluster data frame.
+cluster_basis <- rownames(bath_basis_km$centers)
+centers_basis <- data.frame(cluster_basis, bath_basis_km$centers)
+
+# Reshape.
+centers_basis.plot <- melt(centers_basis, id.vars = "cluster_basis", measure.vars = names(centers_basis[,-1]))
+
+# Make cluster names a factor variable
+centers_basis.plot$cluster <- factor(centers_basis.plot$cluster)
+
+# Create the plot.
+ggplot(centers_basis.plot, aes(x = variable, y = value, color = cluster, group = cluster)) + 
+  geom_line() + 
+  geom_point() +
+  labs(caption = "Figure 4. Centroid plot for basis of purchase") +
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, size = 5), axis.title.x = element_blank())
+
+# Display the un-normalized means for each variable by cluster.
+bath_basis_tab <- t(round(aggregate(bath_basis, by = list(bath_basis_km$cluster), FUN = mean), 2))
+colnames(bath_basis_tab) <- c("Cluster 1", "Cluster 2", "Cluster 3")
+bath_basis_tab <- bath_basis_tab[-1, ]
+kable(bath_basis_tab, caption = "Table 2. Basis of Purchase Centroids")
+```
+
+Cluster 1 is more than 5 times larger than the other two clusters. Additionally, from the results shown in Figure 4 and Table 2, the following information can be seen:
+
+Cluster 1 (Premium/Popular Cluster): This cluster has the highest value for many of the variables, such as: _Avg Price_, _Pr Cat_ 1 & 2, _PropCat_ 6 through 13 and 15.
+
+Cluster 2 (Economy/Carbolic Cluster): This cluster has very high values for _Pr Cat 3_ and _PropCat 14_, while having a very low value for _PropCat 5_. It also has the lowest value for _Avg Price_, _Pr Cat_ 1 & 4, and _PropCat_ 7 through 11.
+
+Cluster 3 (Sub-popular Cluster): This cluster has a very high value for _Pr Cat 4_ and _PropCat 5_. Additionally it has the lowest value for _PropCat 6_.
+
+
+### Both Purchase Behavior and Basis for Purchase
+
+The optimal number of clusters plot using both the variables that describe purchase behavior and the basis for a purchase is shown in Figure 5.  
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create data frame with variables of interest.
+bath_both <- cbind(bath_basis, bath_purch)
+
+# Normalize the data.
+bath_both_norm <- scale(bath_both)
+rownames(bath_both_norm) <- bath$`Member id`
+
+# Find the optimal number of clusters.
+fviz_nbclust(bath_both_norm, kmeans, k.max = 5, method = "silhouette") + labs(subtitle = "Silhouette method", caption = "Figure 5. Optimal number of clusters for both.")
+```
+
+The optimal number of clusters from Figure 5 is used to run the *k*-means clustering method with all the variables that describe purchase behavior and basis for purchase. The centroid plot with normalized data is shown in Figure 6 and the un-normalized centroid values are displayed in Table 3.
+
+```{r echo=FALSE}
+# Run the K-means with optimal number of clusters.
+set.seed(111)
+bath_both_km <- kmeans(bath_both_norm, 4)
+
+# Display the size of the clusters.
+paste("The size of cluster 1 is: ", bath_both_km$size[1])
+paste("The size of cluster 2 is: ", bath_both_km$size[2])
+paste("The size of cluster 3 is: ", bath_both_km$size[3])
+paste("The size of cluster 4 is: ", bath_both_km$size[4])
+
+# Create cluster data frame.
+cluster_both <- rownames(bath_both_km$centers)
+centers_both <- data.frame(cluster_both, bath_both_km$centers)
+
+# Reshape.
+centers_both.plot <- melt(centers_both, id.vars = "cluster_both", measure.vars = names(centers_both[,-1]))
+
+# Make cluster names a factor variable
+centers_both.plot$cluster <- factor(centers_both.plot$cluster)
+
+# Create the plot.
+ggplot(centers_both.plot, aes(x = variable, y = value, color = cluster, group = cluster)) + 
+  geom_line() + 
+  geom_point() +
+  labs(caption = "Figure 6. Centroid plot for both key sets of variables") +
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, size = 5), axis.title.x = element_blank())
+
+# Display the un-normalized means for each variable by cluster.
+bath_both_tab <- t(round(aggregate(bath_both, by = list(bath_both_km$cluster), FUN = mean), 2))
+colnames(bath_both_tab) <- c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4")
+bath_both_tab <- bath_both_tab[-1, ]
+kable(bath_both_tab, caption = "Table 3. Basis of Purchase and Purchase Behavior Centroids")
+```
+
+It is apparent that clusters 1 & 4 are much larger than clusters 2 & 3. Also from Figure 6 and Table 3, the following information can be seen:
+
+Cluster 1 (Popular Fairness Cluster): This is a fairly loyal cluster as it has a higher value for _Max Brand Loyalty_ than for _Others 999_. It also has the highest value of _Pr Vol No Promo - %_, _Pr Cat 2_, and _PropCat 11_.
+
+Cluster 2 (Economy/Carbolic Loyal Cluster): This is a very loyal cluster as it has the lowest value for _Others 999_ and the highest for _Max Brand Loyalty_. It also has much higher values for _Pr Cat 3_ and _PropCat 14_. It also has the lowest value for many variables such as: _Pur Vol Promo 6%_, _Pr Cat_ 1, 2 & 4, _PropCat_ 5, 7, 8, 10, 11, & 15, _Avg Price_, _Brand Runs_, _No. of Transactions_, and _Value_.
+
+Cluster 3 (Un-loyal Sub-popular Cluster): This is the least loyal cluster with the highest value for _Others 999_ and lowest for _Max Brand Loyalty_. This cluster also has the highest value in _Pur Vol Promo 6%_, _PropCat_ 3 & 4. It also has the lowest value for _Pur Vol No Promo - %_ and _No. of Brands_.
+
+Cluster 4 (High Price/Premium Cluster): This is a fairly unloyal cluster with higher values of _Others 999_ and lower _Max Brand Loyalty_. It has the highest values for many variables including: _Pur Cat 1_, _PropCat_ 6 through 10, 12, 13 & 15, _Avg. Price_, _Brand Runs_, _No. of Trans_, _No. of Brands_, and _value_. Additionally it has the lowest values for _Pr Cat 3_, _PropCat 14_, and _Total Volume_.
+
+
+## Characteristics of Clusters
+
+From Figure 1, 3 and 5 the optimal number of clusters are 5, 3, and 4 respectively. Because the problem wants to look at both purchase behavior and the basis of purchases, the results from Figure 5 are the most relevant. Figure 5 shows that four clusters are optimal. Additionally, Figure 1 and 3 show that the average silhouette width for four clusters is only slightly lower than the optimal number of clusters. Therefore the best segmentation method is *k*-means clustering with four clusters. So, the demographics of the four clusters are inspected below.
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Add the cluster variable.
+bath$Cluster <- bath_both_km$cluster
+bath <- bath %>% mutate(Cluster = case_when(
+  Cluster == 1 ~ "Popular Fairness",
+  Cluster == 2 ~ "Economy/Carbolic Loyal",
+  Cluster == 3 ~ "Un-loyal Sub-popular",
+  TRUE ~ "High Price/Premium"))
+bath$Cluster <- factor(bath$Cluster, levels = c("Popular Fairness", "Economy/Carbolic Loyal", "Un-loyal Sub-popular", "High Price/Premium"))
+
+# Create the plot for SEC.
+bath %>% ggplot(aes(x = Cluster, fill = SEC)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = SEC)) + 
+  ggtitle("Demographic of Socioeconomic Class by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7)) +
+  labs(caption = "Figure 7. Socioeconomic class by cluster")
+```
+
+
+From Figure 7, it appears that as socioeconomic class lowers so does the percent total of household in the High Price/Premium cluster. Also it shows that the percent total of households in the Popular Fairness cluster does not differ between socioeconomic class. Lastly, as socioeconomic class lowers the percent total of households increases for the Economy/Carbolic Loyal and Un-loyal Sub-popular clusters.
+
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create the plot for FEH.
+bath %>% ggplot(aes(x = Cluster, fill = FEH)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = FEH)) + 
+  ggtitle("Demographic of Eating Habits by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7)) +
+  labs(fill = "Eating Habits", caption = "Figure 8. Eating habits by cluster")
+```
+
+
+Figure 8 shows there is no clear relationship between eating habits and cluster membership. Non-vegetarian has the highest percentage in each cluster showing that it is the most likely eating habit. But this does not help classify any relationship between eating habits and clusters.
+
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create the plot for SEX.
+bath %>% ggplot(aes(x = Cluster, fill = SEX)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = SEX)) + 
+  ggtitle("Demographic of Gender by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7)) +
+  labs(fill = "Sex", caption = "Figure 9. Gender by cluster")
+```
+
+
+Figure 9 shows that there is a large percentage of females in each cluster showing that the data set is mainly female. The largest percentage of females is in the High Price/Premium cluster which is also not very brand loyal.
+
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create the plot for AGE.
+bath %>% ggplot(aes(x = Cluster, fill = AGE)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = AGE)) + 
+  ggtitle("Demographic of Age by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7)) +
+  labs(fill = "Age", caption = "Figure 10. Age by cluster")
+```
+
+
+Figure 10 shows that for each cluster as age increases so does the percentage of total number of households. This shows that mostly people over the age of 45 are purchasing soaps. But, there is no significant relationship that can be found between the clusters and age.  
+
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create the plot for EDU.
+bath %>% ggplot(aes(x = Cluster, fill = EDU)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = EDU)) + 
+  ggtitle("Demographic of Education by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7),
+        legend.key.size = unit(.3, 'cm')) +
+  labs(fill = "Education", caption = "Figure 11. Education by cluster")
+```
+
+
+The High Price/Premium cluster has the highest percentage of households with 10-12 years of school and college graduates. This suggest that with more education, a person is more likely to purchase premium soaps and also have less brand loyalty. Also the Economy/Carbolic cluster has a large proportion of illiterate homemakers. This suggest that the less educated the homemaker of the household is, the more brand loyalty they will have.
+
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create the plot for CHILD.
+bath %>% ggplot(aes(x = Cluster, fill = CHILD)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = CHILD)) + 
+  ggtitle("Demographic of Presense of Children by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7)) +
+  labs(fill = "Children", caption = "Figure 12. Presense of children by cluster")
+```
+
+
+Figure 12 shows that the largest percentage is having no children present in the household for every cluster.
+The middle two clusters (Economy/Carbolic Loyal and Un-loyal Sub-popular) have the largest proportion of only children ages 7-14 present. But the Economy/Carbolic cluster has fairly good brand loyalty and the Un-loyal Sub-popular cluster has the worst brand loyalty. So, there is no good relationship between clusters and children preset in the household.
+
+
+```{r fig.dim=c(4,3), echo=FALSE}
+# Create the plot for CS.
+bath %>% ggplot(aes(x = Cluster, fill = CS)) +
+  geom_bar(position = "dodge", aes(y = ..count.. / 600, group = CS)) + 
+  ggtitle("Demographic of Television Availability by Clusters") +
+  ylab("% of Total Number of Households") + 
+  theme(plot.title = element_text(size = 8,face = "bold"),
+        legend.title = element_text(size = 7),
+        legend.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1, size = 6),
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7)) + 
+  labs(fill = "TV Availability", caption = "Figure 13. TV availability by cluster")
+```
+
+
+Figure 13 shows that each cluster has a large percentage of household that have television availability. The cluster with the largest proportion of no television available is the Economy/Carbolic Loyal cluster. 
+
+### Summary and Recommendations
+
+The majority of the clientele is female whose household has television available. The High Price/Premium cluster has the largest proportion of college graduates and as the socioeconomic class lowers so does the percent of households in the cluster. Additionally this cluster is not very brand loyal and has a high number of transactions and brands. So, broadcasting any type of premium soap on television would be an effective way of promoting products specifically for this cluster.
+
+The Popular Fairness cluster is more loyal and tends to purchase soaps without the use of promotions. Also the proportions within the cluster do not differ much between socioeconomic class. From this it is clear that marketing to this cluster could be done through TV ads specifically for popular soaps used for fairness.
+
+Lastly the Economy/Carbolic Loyal cluster has a very low average price with high use of promotions categorized as other. Additionally this cluster has a large proportion of illiterate homemakers and as their socioeconomic class decreases their percent total number of households increases. So, this would be the best cluster to target direct-mail promotions to.
+
+
+## Developed Model
+
+The first model developed to classify this data into clusters uses a classification tree. First, a new data frame was created containing the purchase behavior, basis of a purchase, and the demographics that showed a relationship between clusters. Additionally, each brand purchase percentage was used instead of the max brand loyalty variable created so the classification tree uses the loyalty households have for specific brands. Then the data was split into a training set and a validation set to test the accuracy of the prediction. The classification tree that was created using these variables can be seen in the image below. The cluster membership for the validation data was predicted using this classification tree. The predictions were then compared to the actual cluster assigned to the household for the validation data. Table 4 shows the classification table.
+
+```{r echo=FALSE}
+# Create data frame with all variables for model.
+bath_both$Cluster <- bath$Cluster
+bath_dem <- bath %>% select(2, 7, 9, 23:30)
+bath_3 <- cbind(bath_dem, bath_both)
+bath_3 <- bath_3 %>% select(-37)
+
+set.seed(111)
+
+# Find the training and validation sets.
+train.index <- sample(c(1:dim(bath_3)[1]),
+dim(bath_3)[1]*0.6)
+bath_3_train <- bath_3[train.index, ]
+bath_3_valid <- bath_3[-train.index, ]
+
+# Find the classification tree using training data.
+tree <- rpart(Cluster ~ ., data = bath_3_train, control = rpart.control(maxdepth = 8, minbucket = 25), method = "class")
+
+# Find the best pruned tree.
+pruned <- prune(tree, cp = tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"])
+
+# Print the tree.
+prp(pruned, type = 1, extra = 1, split.font = 1, varlen = 0, box.col=ifelse(pruned$frame$var == "<leaf>", 'dodgerblue', 'yellow'), under = TRUE, under.cex = 1.2)
+
+# Find the predictions using the tree.
+pred <- predict(pruned, newdata = bath_3_valid, type = "class")
+
+# Display the classification table and overall accuracy.
+kable(confusionMatrix(pred, as.factor(bath_3_valid$Cluster))$table, caption = "Table 4. Classification table using classification tree model.")
+
+paste("The overall accuracy using the classification tree is: ", 100*round(confusionMatrix(pred, as.factor(bath_3_valid$Cluster))$overall[1], 3), "%", sep = "")
+```
+
+It is apparent that this model is not highly accurate at predicting cluster membership on the validation data. While each terminal node is fairly dominated by one cluster, the overall accuracy is only 81.7%. But, this model allows for the rules of the classification to be seen. For example, the recommendations above show that the Economy/Carbolic Loyal cluster would be the marketing segmentation classified as a success. So, from this classification tree the rule for a success would be if the percent volume purchased from the brand Lifebouy (Br. Cd. 55) is greater than or equal to 47, then the Economy/Carbolic Loyal cluster is selected. But, because this was not highly accurate with its predictions, the use of a random forest was applied. The classification table for this method can be seen in Table 5.
+
+```{r echo=FALSE}
+set.seed(111)
+
+# Clean the names so random forest will run. Then change cluster to a factor for training data.
+bath_3_train <- janitor::clean_names(bath_3_train)
+bath_3_valid <- janitor::clean_names(bath_3_valid)
+bath_3_train$cluster <- as.factor(bath_3_train$cluster)
+
+# Run the random forest on training data.
+rf <- randomForest(cluster ~ ., data = bath_3_train, mtry = 4)
+
+# Find the predicted values on validation data.
+pred2 <- predict(rf, newdata = bath_3_valid)
+
+# Display classification table and overall accuracy.
+kable(confusionMatrix(pred2, as.factor(bath_3_valid$cluster))$table, caption = "Table 5. Classification table using random forest model.")
+
+paste("The overall accuracy using the random forest method is: ", 100*round(confusionMatrix(pred2, as.factor(bath_3_valid$cluster))$overall[1], 3), "%", sep = "")
+```
+
+The random forest model resulted in a much higher overall accuracy on the validation data shows that this model is preferred. Additionally, the model correctly predicted every households into the Economy/Carbolic Loyal cluster, which is classified as a success for direct-mail promotions. So, it is apparent that this random forest model can be used to target direct-mail promotions with fairly high efficiency.
